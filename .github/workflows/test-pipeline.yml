@@ -1,0 +1,30 @@
+name: Test Offline Frame Pipeline
+
+on:
+  push:
+    paths:
+      - .github/workflows/test-pipeline.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install FFmpeg and Python dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ffmpeg
+          command -v ffmpeg
+          command -v ffprobe
+          python -m pip install -r requirements.txt
+      - name: Run end-to-end frame extraction test
+        run: python -m unittest discover -s tests -v
