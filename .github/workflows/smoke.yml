@@ -1,0 +1,63 @@
+name: Smoke Test - No Cookie Video Frames
+
+on:
+  push:
+    paths:
+      - .github/workflows/smoke.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Install dependencies
+        run: |
+          python -m pip install -r requirements.txt
+          python -m compileall -q scripts
+          ffmpeg -version | head -n 1
+
+      - name: Download 30 seconds and extract frames WITHOUT cookies
+        id: extract
+        continue-on-error: true
+        run: |
+          python scripts/extract.py \
+            --url "https://www.youtube.com/watch?v=XicevhyRvL0" \
+            --mode test \
+            --start "00:20:00" \
+            --end "00:20:30" \
+            --max-frames 30 \
+            --out out \
+            --work "$RUNNER_TEMP/aov-video"
+
+      - name: Build reference index from aov-project
+        if: always()
+        continue-on-error: true
+        run: python scripts/references.py --out out/references
+
+      - name: Upload diagnostic artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-frames-${{ github.run_id }}
+          path: out/
+          retention-days: 14
+          if-no-files-found: warn
+
+      - name: Fail on extraction error
+        if: always() && steps.extract.outcome == 'failure'
+        run: exit 1
