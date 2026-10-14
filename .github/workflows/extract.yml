@@ -1,0 +1,106 @@
+name: Extract AOV YouTube Frames
+
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: "URL YouTube VOD (không cần cookie)"
+        required: true
+        default: "https://www.youtube.com/watch?v=XicevhyRvL0"
+        type: string
+      mode:
+        description: "test=1 phút | scan=toàn livestream | detail=đoạn 1080p"
+        required: true
+        default: test
+        type: choice
+        options:
+          - test
+          - scan
+          - detail
+      clip_start:
+        description: "MM:SS hoặc HH:MM:SS; để trống = tự động (test: 20:00)"
+        required: false
+        default: ""
+        type: string
+      clip_end:
+        description: "MM:SS hoặc HH:MM:SS; để trống = tự động (test: 21:00)"
+        required: false
+        default: ""
+        type: string
+      max_frames:
+        description: "Giới hạn số ảnh (1–10000), tự tăng khoảng cách ở clip dài"
+        required: true
+        default: "1800"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  frames:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout extract-lq-yt
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Set up Deno for YouTube JS support
+        uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      - name: Install requirements
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          ffmpeg -version | head -n 1
+          ffprobe -version | head -n 1
+          python -m compileall -q scripts
+
+      - name: Extract video frames (no cookies)
+        id: extract
+        continue-on-error: true
+        env:
+          VIDEO_URL: ${{ inputs.video_url }}
+          MODE: ${{ inputs.mode }}
+          CLIP_START: ${{ inputs.clip_start }}
+          CLIP_END: ${{ inputs.clip_end }}
+          MAX_FRAMES: ${{ inputs.max_frames }}
+          WORK_DIR: ${{ runner.temp }}/aov-video
+        run: |
+          python scripts/extract.py \
+            --url "$VIDEO_URL" \
+            --mode "$MODE" \
+            --start "$CLIP_START" \
+            --end "$CLIP_END" \
+            --max-frames "$MAX_FRAMES" \
+            --out out \
+            --work "$WORK_DIR"
+
+      - name: Fetch aov-project reference metadata (no LFS images)
+        if: always()
+        continue-on-error: true
+        run: |
+          python scripts/references.py --out out/references
+
+      - name: Upload frames and reference index
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aov-frames-${{ github.run_id }}-${{ github.run_attempt }}
+          path: out/
+          if-no-files-found: warn
+          retention-days: 14
+          compression-level: 5
+
+      - name: Mark workflow failed when extraction failed
+        if: always() && steps.extract.outcome == 'failure'
+        run: |
+          echo "::error::Video extraction failed. Check out/report.json and workflow logs."
+          exit 1
